@@ -3,36 +3,30 @@ import React, { useEffect, useRef, useState } from 'react'
 const DropdownSuggestion = () => {
     const [data, setData] = useState([])
     const [search, setSearch] = useState("")
-    const timeoutID = useRef(null)
     const [loading, setLoading] = useState(false)
-    const [selected, setSlected] = useState([])
+    const [selected, setSelected] = useState([])
+    const [selectedOption, setSelectedOption] = useState(0)
+    const timeoutID = useRef(null)
     const searchRef = useRef()
+    const listRefs = useRef([]) // ✅ Array of refs
+
     const fetchData = async () => {
         setLoading(true)
-        const url = `https://dummyjson.com/users/search?q=${search}`
-
-        await fetch(url)
-            .then((res) => res.json()) // ✅ response ko parse karo
-            .then((resData) => {
-                setData(resData?.users || []) // ✅ data set karo
-            })
-            .catch((error) => {
-                console.log("Fetch error:", error)
-            })
-            .finally(() => {
-                setLoading(false) // ✅ loading hatao
-            })
+        try {
+            const res = await fetch(`https://dummyjson.com/users/search?q=${search}`)
+            const resData = await res.json()
+            setData(resData?.users || [])
+        } catch (error) {
+            console.log("Fetch error:", error)
+        } finally {
+            setLoading(false)
+        }
     }
 
     useEffect(() => {
         if (search) {
-            if (timeoutID.current) {
-                clearTimeout(timeoutID.current)
-            }
-            timeoutID.current = setTimeout(() => {
-                fetchData()
-            }, 500);
-
+            clearTimeout(timeoutID.current)
+            timeoutID.current = setTimeout(fetchData, 500)
         } else {
             setData([])
         }
@@ -40,58 +34,91 @@ const DropdownSuggestion = () => {
     }, [search])
 
     const handleSelect = (user) => {
-        setSlected((perv) => [...perv, user])
+        setSelected(prev => [...prev, user])
         setSearch("")
         searchRef.current.focus()
     }
-    console.log(selected);
+
     const handleRemove = (user) => {
-        const updatedSelected = selected.filter((usr) => user.id !== usr.id)
-        setSlected(updatedSelected)
+        setSelected(prev => prev.filter((u) => u.id !== user.id))
         searchRef.current.focus()
     }
-    const handleKeydown = (e) => {
-        if (e.key === "Backspace" && !search && selected.length > 0) {
-            const lastUser = selected[selected.length - 1]
-            handleRemove(lastUser)
-        }
 
+    const filteredData = data.filter(user => !selected.find(sel => sel.id === user.id))
+
+    const handleKeyDown = (e) => {
+
+        if (e.key === "Backspace" && !search && selected.length > 0) {
+            handleRemove(selected[selected.length - 1])
+        }
+        if (e.key === "Enter") {
+            if (filteredData[selectedOption]) {
+                handleSelect(filteredData[selectedOption])
+                setSelectedOption(0)
+            }
+        }
+        if (e.key === "ArrowDown") {
+            e.preventDefault()
+            setSelectedOption(prev => Math.min(prev + 1, filteredData.length - 1))
+            searchRef.current.focus()
+        }
+        if (e.key === "ArrowUp") {
+            e.preventDefault()
+            setSelectedOption(prev => Math.max(prev - 1, 0))
+            searchRef.current.focus()
+        }
     }
+
+    useEffect(() => {
+        if (listRefs.current[selectedOption]) {
+            listRefs.current[selectedOption].scrollIntoView({
+                behavior: "smooth",
+                block: "nearest"
+            })
+        }
+    }, [selectedOption])
+
     return (
         <>
-            <div className='selected'>{
-                selected && selected.length > 0 &&
-                selected.map((user) => {
-                    const name = `${user?.firstName} ${user?.lastName}`
-                    return (
-                        <div className='slected-child' key={user.id}>
-                            <img src={user?.image} alt={user?.firstName} /> <span>{name}</span> <span className='cross' onClick={() => handleRemove(user)}>&times;</span>
-                        </div>
-                    )
-                })}
-                { }
-
+            <div className='selected'>
+                {selected.map(user => (
+                    <div className='selected-child' key={user.id}>
+                        <img src={user.image} alt={user.firstName} />
+                        <span>{user.firstName} {user.lastName}</span>
+                        <span className='cross' onClick={() => handleRemove(user)}>&times;</span>
+                    </div>
+                ))}
             </div>
+
             <div className='suggestion-wrapper'>
-                <input type="text" placeholder='Enter here...' ref={searchRef} value={search}
-                    onChange={(e) => { setSearch(e.target.value) }} onKeyDown={handleKeydown} />
+                <input
+                    ref={searchRef}
+                    type="text"
+                    placeholder="Enter here..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                />
                 <ul className='suggestion-container'>
                     {
-                        data && data.length > 0 ?
-                            data.filter((user) => !selected.find((sel) => sel.id === user.id)).map((user) => {
-                                let name = `${user?.firstName} ${user?.lastName}`
-                                if (search) {
-                                    const regex = new RegExp(search, "gi")
-                                    const matchedValues = name.match(regex);
-                                    const splittedValue = name.split(regex)
-                                    name = splittedValue?.length > 0 && matchedValues ? `${splittedValue[0]}<b>${matchedValues[0]}</b>${splittedValue[1]}` : name
-                                }
+                        filteredData.length > 0 ? filteredData.map((user, index) => {
+                            const name = `${user.firstName} ${user.lastName}`
+                            const regex = new RegExp(search, "gi")
+                            const highlighted = name.replace(regex, match => `<b>${match}</b>`)
 
-                                return <li key={user.id} onClick={() => handleSelect(user)} > <img src={user?.image} alt={user?.firstName} />
-                                    <span dangerouslySetInnerHTML={{ __html: name }}></span></li>
-                            })
-                            : search &&
-                            <li>{loading ? "Loading..." : "No Data Found"}</li>
+                            return (
+                                <li
+                                    key={user.id}
+                                    ref={el => listRefs.current[index] = el} // ✅ Save ref
+                                    onClick={() => handleSelect(user)}
+                                    className={selectedOption === index ? "selected-option" : ""}
+                                >
+                                    <img src={user.image} alt={user.firstName} />
+                                    <span dangerouslySetInnerHTML={{ __html: highlighted }} />
+                                </li>
+                            )
+                        })
+                            : search && <li>{loading ? "Loading..." : "No Data Found"}</li>
                     }
                 </ul>
             </div>
